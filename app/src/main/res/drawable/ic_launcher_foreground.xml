@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- sombra -->
+    <path
+        android:fillColor="#33000000"
+        android:pathData="M38,33h36a4,4 0,0 1,4 4v42a4,4 0,0 1,-4 4h-36a4,4 0,0 1,-4 -4v-42a4,4 0,0 1,4 -4z" />
+    <!-- folha -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M36,31h36a4,4 0,0 1,4 4v42a4,4 0,0 1,-4 4h-36a4,4 0,0 1,-4 -4v-42a4,4 0,0 1,4 -4z" />
+    <!-- faixa superior -->
+    <path
+        android:fillColor="#FFFFC857"
+        android:pathData="M32,35a4,4 0,0 1,4 -4h36a4,4 0,0 1,4 4v7h-44z" />
+    <!-- argolas -->
+    <path
+        android:fillColor="#FF3B2F7A"
+        android:pathData="M39.5,31a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0z M47.5,31a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0z M55.5,31a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0z M63.5,31a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0z" />
+    <!-- linhas -->
+    <path
+        android:strokeColor="#FFB9AEF0"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M39,52H69 M39,60H69 M39,68H60" />
+</vector>
