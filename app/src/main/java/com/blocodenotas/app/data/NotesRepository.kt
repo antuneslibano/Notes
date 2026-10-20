@@ -52,13 +52,11 @@ class NotesRepository(context: Context) {
 
     // ---------- Notas ----------
 
-    fun createNote(folderId: Long? = null, checklist: Boolean = false): Note {
+    fun createNote(folderId: Long? = null): Note {
         val now = System.currentTimeMillis()
         val note = Note(
             id = newId(),
-            isChecklist = checklist,
-            items = if (checklist) listOf(ChecklistItem(newId(), "")) else emptyList(),
-            icon = if (checklist) NoteIcon.CHECK else NoteIcon.NOTE,
+            blocks = listOf(Block(newId())),
             folderId = folderId,
             createdAt = now,
             updatedAt = now,
@@ -106,7 +104,7 @@ class NotesRepository(context: Context) {
         val copy = original.copy(
             id = newId(),
             title = if (original.title.isBlank()) "Cópia" else original.title + " (cópia)",
-            items = original.items.map { it.copy(id = newId()) },
+            blocks = original.blocks.map { it.copy(id = newId()) },
             pinned = false,
             createdAt = now,
             updatedAt = now,
@@ -184,7 +182,7 @@ class NotesRepository(context: Context) {
             // Remove notas vazias esquecidas e itens antigos da lixeira.
             notes = loadedNotes.filterNot { it.isBlank || (it.deletedAt != null && it.deletedAt < limit) }
             folders = loadedFolders
-            lastId = (notes.map { it.id } + notes.flatMap { n -> n.items.map { it.id } } + folders.map { it.id })
+            lastId = (notes.map { it.id } + notes.flatMap { n -> n.blocks.map { it.id } } + folders.map { it.id })
                 .maxOrNull() ?: 0L
             if (notes.size != loadedNotes.size) scheduleSave()
         } catch (e: Exception) {
@@ -197,11 +195,11 @@ class NotesRepository(context: Context) {
 
     private fun seed() {
         val now = System.currentTimeMillis()
+        fun b(type: BlockType, text: String = "", marks: List<TextMark> = emptyList()) = Block(newId(), type, text, marks)
         val list = Note(
             id = newId(),
             title = "Lista de compras",
-            isChecklist = true,
-            items = listOf("Leite", "Café", "Pão", "Frutas").map { ChecklistItem(newId(), it) },
+            blocks = listOf("Leite", "Café", "Pão", "Frutas").map { b(BlockType.TODO, it) },
             icon = NoteIcon.CART,
             pinned = true,
             createdAt = now,
@@ -210,16 +208,29 @@ class NotesRepository(context: Context) {
         val welcome = Note(
             id = newId(),
             title = "Bem-vindo ao Minhas Notas",
-            content = """
-                Tudo o que você escreve é salvo automaticamente no celular, sem internet.
-
-                • Toque no + para criar uma nota ou uma lista.
-                • Segure uma nota para fixar, favoritar, duplicar ou excluir.
-                • Use as setas no topo do editor para desfazer e refazer.
-                • Em Configurações você encontra o modo escuro, o bloqueio por PIN ou biometria e o backup.
-
-                Como as notas ficam só neste aparelho, faça um backup de vez em quando.
-            """.trimIndent(),
+            blocks = listOf(
+                b(BlockType.TEXT, "Tudo o que você escreve é salvo automaticamente no celular, sem internet."),
+                b(BlockType.H2, "Comandos com /"),
+                b(BlockType.TEXT, "Digite / em qualquer linha para escolher o tipo de bloco:"),
+                b(BlockType.BULLET, "/h1, /h2 e /h3 para títulos"),
+                b(BlockType.BULLET, "/lista, /numerada e /todo para listas"),
+                b(BlockType.BULLET, "/citacao, /destaque, /codigo e /divisor"),
+                b(BlockType.H2, "Atalhos ao digitar"),
+                b(BlockType.TEXT, "# título   - lista   1. numerada   [] tarefa   > citação   --- divisor"),
+                b(BlockType.H2, "Cores e estilos"),
+                b(
+                    BlockType.TEXT,
+                    "Selecione palavras para deixar em negrito, itálico, colorir ou marcar com destaque.",
+                    listOf(
+                        TextMark(34, 41, MarkKind.BOLD),
+                        TextMark(43, 50, MarkKind.ITALIC),
+                        TextMark(52, 59, MarkKind.COLOR, 7),
+                        TextMark(63, 82, MarkKind.HIGHLIGHT, 4),
+                    ),
+                ),
+                b(BlockType.DIVIDER),
+                b(BlockType.CALLOUT, "Como as notas ficam só neste aparelho, faça um backup de vez em quando em Configurações."),
+            ),
             icon = NoteIcon.LIGHTBULB,
             createdAt = now,
             updatedAt = now,
@@ -261,7 +272,7 @@ class NotesRepository(context: Context) {
             notes = notes.filterNot { it.id in noteIds } + importedNotes
             folders = folders.filterNot { it.id in folderIds } + importedFolders
         }
-        lastId = maxOf(lastId, (notes.map { it.id } + folders.map { it.id }).maxOrNull() ?: 0L)
+        lastId = maxOf(lastId, (notes.map { it.id } + notes.flatMap { n -> n.blocks.map { it.id } } + folders.map { it.id }).maxOrNull() ?: 0L)
         scheduleSave()
         return importedNotes.size
     }
@@ -302,13 +313,7 @@ class NotesRepository(context: Context) {
         private fun noteToJson(n: Note) = JSONObject().apply {
             put("id", n.id)
             put("title", n.title)
-            put("content", n.content)
-            put("isChecklist", n.isChecklist)
-            put("items", JSONArray().apply {
-                n.items.forEach {
-                    put(JSONObject().put("id", it.id).put("text", it.text).put("checked", it.checked))
-                }
-            })
+            put("blocks", JSONArray().apply { n.blocks.forEach { put(blockToJson(it)) } })
             put("icon", n.icon.name)
             put("folderId", n.folderId ?: JSONObject.NULL)
             put("pinned", n.pinned)
@@ -318,19 +323,62 @@ class NotesRepository(context: Context) {
             put("deletedAt", n.deletedAt ?: JSONObject.NULL)
         }
 
+        private fun blockToJson(b: Block) = JSONObject().apply {
+            put("id", b.id)
+            put("type", b.type.name)
+            put("text", b.text)
+            if (b.checked) put("checked", true)
+            if (b.marks.isNotEmpty()) {
+                put("marks", JSONArray().apply {
+                    b.marks.forEach { m ->
+                        put(JSONObject().put("s", m.start).put("e", m.end).put("k", m.kind.name).put("c", m.color))
+                    }
+                })
+            }
+        }
+
+        private fun blockFromJson(o: JSONObject): Block {
+            val text = o.optString("text")
+            val marksArray = o.optJSONArray("marks") ?: JSONArray()
+            val marks = (0 until marksArray.length()).mapNotNull {
+                val m = marksArray.getJSONObject(it)
+                val kind = MarkKind.entries.firstOrNull { k -> k.name == m.optString("k") } ?: return@mapNotNull null
+                val start = m.optInt("s").coerceIn(0, text.length)
+                val end = m.optInt("e").coerceIn(0, text.length)
+                if (end > start) TextMark(start, end, kind, m.optInt("c")) else null
+            }
+            return Block(
+                id = o.getLong("id"),
+                type = BlockType.from(o.optString("type")),
+                text = text,
+                marks = marks,
+                checked = o.optBoolean("checked"),
+            )
+        }
+
         private fun noteFromJson(o: JSONObject): Note {
-            val itemsArray = o.optJSONArray("items") ?: JSONArray()
-            val items = (0 until itemsArray.length()).map {
-                val item = itemsArray.getJSONObject(it)
-                ChecklistItem(item.getLong("id"), item.optString("text"), item.optBoolean("checked"))
+            val id = o.getLong("id")
+            val blocksArray = o.optJSONArray("blocks")
+            val blocks = if (blocksArray != null) {
+                (0 until blocksArray.length()).map { blockFromJson(blocksArray.getJSONObject(it)) }
+            } else {
+                // Formato da primeira versão: texto corrido ou lista de itens.
+                var next = id * 1000
+                if (o.optBoolean("isChecklist")) {
+                    val items = o.optJSONArray("items") ?: JSONArray()
+                    (0 until items.length()).map {
+                        val item = items.getJSONObject(it)
+                        Block(item.optLong("id", ++next), BlockType.TODO, item.optString("text"), checked = item.optBoolean("checked"))
+                    }
+                } else {
+                    o.optString("content").split("\n").map { Block(++next, BlockType.TEXT, it) }
+                }
             }
             val created = o.optLong("createdAt", System.currentTimeMillis())
             return Note(
-                id = o.getLong("id"),
+                id = id,
                 title = o.optString("title"),
-                content = o.optString("content"),
-                isChecklist = o.optBoolean("isChecklist"),
-                items = items,
+                blocks = blocks.ifEmpty { listOf(Block(id * 1000 + 1)) },
                 icon = NoteIcon.from(o.optString("icon")),
                 folderId = if (o.isNull("folderId")) null else o.getLong("folderId"),
                 pinned = o.optBoolean("pinned"),

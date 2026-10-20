@@ -20,14 +20,10 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.StarBorder
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
@@ -114,8 +110,8 @@ private fun MainScaffold(nav: Navigator, screen: Screen) {
             BottomBar(
                 selected = tab,
                 onSelect = { nav.selectTab(it) },
-                onCreate = { checklist ->
-                    val note = repo.createNote(folderId = newNoteFolder, checklist = checklist)
+                onCreate = {
+                    val note = repo.createNote(folderId = newNoteFolder)
                     if (screen == Screen.Favorites) repo.updateNote(note.id, touch = false) { it.copy(favorite = true) }
                     open(note.id)
                 },
@@ -136,8 +132,7 @@ private fun MainScaffold(nav: Navigator, screen: Screen) {
 }
 
 @Composable
-private fun BottomBar(selected: Screen, onSelect: (Screen) -> Unit, onCreate: (checklist: Boolean) -> Unit) {
-    var createMenu by remember { mutableStateOf(false) }
+private fun BottomBar(selected: Screen, onSelect: (Screen) -> Unit, onCreate: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.background) {
         Row(
             Modifier
@@ -151,7 +146,7 @@ private fun BottomBar(selected: Screen, onSelect: (Screen) -> Unit, onCreate: (c
             NavItem("Pastas", Icons.Outlined.Folder, Icons.Filled.Folder, selected == Screen.Folders) { onSelect(Screen.Folders) }
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 FloatingActionButton(
-                    onClick = { createMenu = true },
+                    onClick = onCreate,
                     shape = CircleShape,
                     containerColor = Accent,
                     contentColor = Color.White,
@@ -159,18 +154,6 @@ private fun BottomBar(selected: Screen, onSelect: (Screen) -> Unit, onCreate: (c
                     modifier = Modifier.size(62.dp),
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = "Nova nota", modifier = Modifier.size(30.dp))
-                }
-                DropdownMenu(expanded = createMenu, onDismissRequest = { createMenu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Nova nota") },
-                        leadingIcon = { Icon(Icons.Outlined.Description, null) },
-                        onClick = { createMenu = false; onCreate(false) },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Nova lista") },
-                        leadingIcon = { Icon(Icons.Outlined.CheckBox, null) },
-                        onClick = { createMenu = false; onCreate(true) },
-                    )
                 }
             }
             NavItem("Favoritos", Icons.Outlined.StarBorder, Icons.Filled.Star, selected == Screen.Favorites) { onSelect(Screen.Favorites) }

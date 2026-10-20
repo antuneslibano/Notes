@@ -4,18 +4,10 @@ import java.text.Collator
 import java.text.Normalizer
 import java.util.Locale
 
-data class ChecklistItem(
-    val id: Long,
-    val text: String,
-    val checked: Boolean = false,
-)
-
 data class Note(
     val id: Long,
     val title: String = "",
-    val content: String = "",
-    val isChecklist: Boolean = false,
-    val items: List<ChecklistItem> = emptyList(),
+    val blocks: List<Block> = emptyList(),
     val icon: NoteIcon = NoteIcon.NOTE,
     val folderId: Long? = null,
     val pinned: Boolean = false,
@@ -27,27 +19,39 @@ data class Note(
     val isDeleted: Boolean get() = deletedAt != null
 
     val isBlank: Boolean
-        get() = title.isBlank() && content.isBlank() && items.all { it.text.isBlank() }
+        get() = title.isBlank() && blocks.all { it.text.isBlank() }
 
     fun displayTitle(): String = title.ifBlank { "Sem título" }
 
-    /** Corpo da nota como texto puro (listas viram linhas com caixas de seleção). */
-    fun bodyText(): String =
-        if (isChecklist) {
-            items.filter { it.text.isNotBlank() }
-                .joinToString("\n") { (if (it.checked) "☑ " else "☐ ") + it.text }
-        } else {
-            content
+    /** Corpo da nota como texto puro, com marcadores simples no lugar da formatação. */
+    fun bodyText(): String {
+        val lines = ArrayList<String>()
+        var number = 0
+        for (b in blocks) {
+            number = if (b.type == BlockType.NUMBERED) number + 1 else 0
+            lines += when (b.type) {
+                BlockType.DIVIDER -> "———"
+                BlockType.TODO -> (if (b.checked) "☑ " else "☐ ") + b.text
+                BlockType.BULLET -> "• " + b.text
+                BlockType.NUMBERED -> "$number. " + b.text
+                BlockType.QUOTE -> "> " + b.text
+                BlockType.CALLOUT -> "💡 " + b.text
+                else -> b.text
+            }
         }
+        return lines.joinToString("\n").trim('\n')
+    }
 
     fun fullText(): String = listOf(title, bodyText()).filter { it.isNotBlank() }.joinToString("\n\n")
 
-    fun preview(): String =
-        if (isChecklist) {
-            items.filter { it.text.isNotBlank() }.joinToString(", ") { it.text.trim() }
-        } else {
-            content.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.joinToString(" ")
-        }
+    fun preview(): String {
+        val filled = blocks.filter { it.text.isNotBlank() }
+        val separator = if (filled.isNotEmpty() && filled.all { it.type.isList }) ", " else " "
+        return filled.joinToString(separator) { it.text.replace('\n', ' ').trim() }
+    }
+
+    /** Só o texto escrito, sem marcadores, para contar palavras e caracteres. */
+    fun plainText(): String = blocks.joinToString("\n") { it.text }
 }
 
 data class Folder(
@@ -87,8 +91,8 @@ enum class SortField(val label: String) {
 
 enum class NoteFilter(val label: String) {
     ALL("Todas"),
-    TEXT("Somente textos"),
-    CHECKLIST("Somente listas"),
+    TODO("Com tarefas"),
+    PENDING("Com tarefas pendentes"),
     FAVORITES("Somente favoritas"),
 }
 
@@ -113,8 +117,8 @@ fun List<Note>.sortedFor(field: SortField, ascending: Boolean): List<Note> {
 
 fun List<Note>.filteredBy(filter: NoteFilter): List<Note> = when (filter) {
     NoteFilter.ALL -> this
-    NoteFilter.TEXT -> filter { !it.isChecklist }
-    NoteFilter.CHECKLIST -> filter { it.isChecklist }
+    NoteFilter.TODO -> filter { n -> n.blocks.any { it.type == BlockType.TODO } }
+    NoteFilter.PENDING -> filter { n -> n.blocks.any { it.type == BlockType.TODO && !it.checked && it.text.isNotBlank() } }
     NoteFilter.FAVORITES -> filter { it.favorite }
 }
 
@@ -126,7 +130,7 @@ fun normalizeForSearch(text: String): String =
 fun List<Note>.searchedFor(query: String): List<Note> {
     val q = normalizeForSearch(query.trim())
     if (q.isEmpty()) return this
-    return filter { normalizeForSearch(it.title + "\n" + it.bodyText()).contains(q) }
+    return filter { normalizeForSearch(it.title + "\n" + it.plainText()).contains(q) }
 }
 
 private val wordRegex = Regex("\\S+")

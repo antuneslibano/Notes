@@ -12,13 +12,17 @@ Versões novas podem ser instaladas por cima da antiga, sem perder as notas.
 
 ## Funções
 
-- Notas de texto e listas (compras, tarefas, lembretes) com caixas de seleção
+- Editor em blocos no estilo do Notion antigo: digite `/` em qualquer linha para escolher
+  `/h1` `/h2` `/h3` `/texto` `/lista` (ou `/list`) `/numerada` `/todo` `/citacao` `/destaque` `/codigo` `/divisor`
+- Atalhos ao digitar no começo da linha: `# ` `## ` `### ` `- ` `1. ` `[] ` `> ` ` ``` ` `---`
+- Selecione palavras para aplicar negrito, itálico, sublinhado, tachado, cor do texto e cor de fundo
+- Listas de tarefas, com marcadores ou numeradas, em qualquer ponto de qualquer nota
 - Salvamento automático enquanto você escreve, gravado de forma segura no armazenamento interno
 - Notas fixadas, favoritos e pastas
 - Pesquisa (ignora acentos), filtro por tipo e ordenação por data de alteração, data de criação ou nome
 - Lixeira com recuperação (itens são apagados de vez após 30 dias) e confirmação antes de excluir
 - Desfazer e refazer no editor
-- Duplicar nota, copiar todo o conteúdo, mudar ícone, mover para pasta, converter texto ⇄ lista
+- Duplicar nota, copiar todo o conteúdo, mudar ícone, mover para pasta, remover tarefas concluídas
 - Contador de palavras e caracteres; datas de criação e de alteração
 - Modo claro, escuro ou seguindo o sistema
 - Bloqueio opcional por PIN e biometria

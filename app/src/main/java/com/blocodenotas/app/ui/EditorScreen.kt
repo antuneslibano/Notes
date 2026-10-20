@@ -5,17 +5,17 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,23 +28,17 @@ import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.CheckBox
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
-import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.LibraryAdd
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -62,7 +56,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -77,24 +70,19 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blocodenotas.app.Graph
-import com.blocodenotas.app.data.ChecklistItem
+import com.blocodenotas.app.data.Block
+import com.blocodenotas.app.data.BlockType
 import com.blocodenotas.app.data.Note
 import com.blocodenotas.app.data.NoteIcon
 import com.blocodenotas.app.data.countWords
 
 /** Parte editável de uma nota, usada pelo desfazer/refazer. */
-private data class EditState(
-    val title: String,
-    val content: String,
-    val isChecklist: Boolean,
-    val items: List<ChecklistItem>,
-)
+private data class EditState(val title: String, val blocks: List<Block>)
 
-private fun Note.editState() = EditState(title, content, isChecklist, items)
+private fun Note.editState() = EditState(title, blocks)
 
 /**
  * Histórico de edições. Digitação contínua vira um único passo: um novo ponto de desfazer
@@ -146,6 +134,8 @@ private class EditHistory {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(noteId: Long, onBack: () -> Unit, onOpenNote: (Long) -> Unit) {
     val repo = Graph.repo
@@ -158,23 +148,23 @@ fun EditorScreen(noteId: Long, onBack: () -> Unit, onOpenNote: (Long) -> Unit) {
     }
 
     val history = remember(noteId) { EditHistory() }
+    val state = remember(noteId) {
+        BlockEditorState(noteId) { kind, transform ->
+            // Toda alteração vai direto para o repositório, que grava no aparelho em seguida.
+            repo.note(noteId)?.let { history.record(it.editState(), kind) }
+            repo.updateNote(noteId, transform = transform)
+        }
+    }
+    val titleRequester = remember { FocusRequester() }
     var menu by remember { mutableStateOf(false) }
     var confirmTrash by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
     var pickIcon by remember { mutableStateOf(false) }
     var pickFolder by remember { mutableStateOf(false) }
-    var focusItemId by remember { mutableStateOf<Long?>(null) }
 
-    // Toda alteração vai direto para o repositório, que grava no aparelho em seguida.
-    fun edit(kind: String, transform: (Note) -> Note) {
-        history.record(note.editState(), kind)
-        repo.updateNote(noteId, transform = transform)
-    }
-
-    fun applyState(state: EditState) {
-        repo.updateNote(noteId) {
-            it.copy(title = state.title, content = state.content, isChecklist = state.isChecklist, items = state.items)
-        }
+    fun applyState(s: EditState) {
+        state.slash = null
+        repo.updateNote(noteId) { it.copy(title = s.title, blocks = s.blocks) }
     }
 
     fun leave() {
@@ -182,6 +172,13 @@ fun EditorScreen(noteId: Long, onBack: () -> Unit, onOpenNote: (Long) -> Unit) {
         if (current != null && current.isBlank && !current.isDeleted) repo.deletePermanently(noteId)
         repo.flush()
         onBack()
+    }
+
+    LaunchedEffect(noteId) {
+        if (repo.note(noteId)?.blocks.isNullOrEmpty()) {
+            repo.updateNote(noteId, touch = false) { it.copy(blocks = listOf(Block(repo.newId()))) }
+        }
+        if (repo.note(noteId)?.isBlank == true) runCatching { titleRequester.requestFocus() }
     }
 
     BackHandler { leave() }
@@ -238,44 +235,15 @@ fun EditorScreen(noteId: Long, onBack: () -> Unit, onOpenNote: (Long) -> Unit) {
                                 }
                             },
                         )
-                        if (note.isChecklist) {
+                        if (note.blocks.any { it.type == BlockType.TODO && it.checked }) {
                             DropdownMenuItem(
-                                text = { Text("Converter em texto") },
-                                leadingIcon = { Icon(Icons.Outlined.Description, null) },
+                                text = { Text("Remover tarefas concluídas") },
+                                leadingIcon = { Icon(Icons.Outlined.DeleteSweep, null) },
                                 onClick = {
                                     menu = false
-                                    edit("convert") { n ->
-                                        n.copy(
-                                            isChecklist = false,
-                                            content = n.items.filter { it.text.isNotBlank() }.joinToString("\n") { it.text },
-                                            items = emptyList(),
-                                        )
-                                    }
-                                },
-                            )
-                            if (note.items.any { it.checked }) {
-                                DropdownMenuItem(
-                                    text = { Text("Remover itens marcados") },
-                                    leadingIcon = { Icon(Icons.Outlined.DeleteSweep, null) },
-                                    onClick = {
-                                        menu = false
-                                        edit("clearChecked") { n -> n.copy(items = n.items.filterNot { it.checked }) }
-                                    },
-                                )
-                            }
-                        } else {
-                            DropdownMenuItem(
-                                text = { Text("Converter em lista") },
-                                leadingIcon = { Icon(Icons.Outlined.CheckBox, null) },
-                                onClick = {
-                                    menu = false
-                                    edit("convert") { n ->
-                                        val lines = n.content.lines().map { it.trim() }.filter { it.isNotEmpty() }
-                                        n.copy(
-                                            isChecklist = true,
-                                            content = "",
-                                            items = (lines.ifEmpty { listOf("") }).map { ChecklistItem(repo.newId(), it) },
-                                        )
+                                    state.edit("clearChecked") { n ->
+                                        val left = n.blocks.filterNot { it.type == BlockType.TODO && it.checked }
+                                        n.copy(blocks = left.ifEmpty { listOf(Block(repo.newId())) })
                                     }
                                 },
                             )
@@ -320,11 +288,13 @@ fun EditorScreen(noteId: Long, onBack: () -> Unit, onOpenNote: (Long) -> Unit) {
             ) {
                 PlainTextField(
                     value = note.title,
-                    onValueChange = { value -> edit("title") { it.copy(title = value) } },
+                    onValueChange = { value -> state.edit("title") { it.copy(title = value) } },
                     placeholder = "Título",
-                    textStyle = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.Bold),
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp),
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                    textStyle = TextStyle(fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp).focusRequester(titleRequester),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(onNext = { state.focusFirst() }),
                 )
                 val folder = repo.folder(note.folderId)
                 Text(
@@ -335,30 +305,18 @@ fun EditorScreen(noteId: Long, onBack: () -> Unit, onOpenNote: (Long) -> Unit) {
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(16.dp))
-
-                if (note.isChecklist) {
-                    ChecklistEditor(
-                        items = note.items,
-                        focusItemId = focusItemId,
-                        onFocusHandled = { focusItemId = null },
-                        onChange = { kind, items -> edit(kind) { it.copy(items = items) } },
-                        newItem = { ChecklistItem(repo.newId(), "") },
-                        onRequestFocus = { focusItemId = it },
-                    )
-                } else {
-                    PlainTextField(
-                        value = note.content,
-                        onValueChange = { value -> edit("content") { it.copy(content = value) } },
-                        placeholder = "Comece a escrever...",
-                        textStyle = TextStyle(fontSize = 18.sp, lineHeight = 27.sp),
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 320.dp),
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    )
-                }
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(14.dp))
+                BlockList(note, state)
+                // Área livre abaixo do texto: tocar nela continua a escrever no fim.
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(240.dp)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { state.focusEnd() },
+                )
             }
-            StatsBar(note)
+            SlashMenu(state)
+            if (state.focusedId != null) BlockToolbar(note, state) else StatsBar(note)
         }
     }
 
@@ -393,98 +351,10 @@ fun EditorScreen(noteId: Long, onBack: () -> Unit, onOpenNote: (Long) -> Unit) {
 }
 
 @Composable
-private fun ChecklistEditor(
-    items: List<ChecklistItem>,
-    focusItemId: Long?,
-    onFocusHandled: () -> Unit,
-    onChange: (kind: String, items: List<ChecklistItem>) -> Unit,
-    newItem: () -> ChecklistItem,
-    onRequestFocus: (Long) -> Unit,
-) {
-    val requesters = remember { mutableStateMapOf<Long, FocusRequester>() }
-    val done = items.count { it.checked }
-    if (items.isNotEmpty()) {
-        Text(
-            "$done de ${items.size} concluídos",
-            fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        items.forEachIndexed { index, item ->
-            val requester = requesters.getOrPut(item.id) { FocusRequester() }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = item.checked,
-                    onCheckedChange = { checked ->
-                        onChange("check", items.map { if (it.id == item.id) it.copy(checked = checked) else it })
-                    },
-                    colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary),
-                )
-                PlainTextField(
-                    value = item.text,
-                    onValueChange = { value ->
-                        onChange("item${item.id}", items.map { if (it.id == item.id) it.copy(text = value) else it })
-                    },
-                    placeholder = "Item da lista",
-                    textStyle = TextStyle(
-                        fontSize = 18.sp,
-                        textDecoration = if (item.checked) TextDecoration.LineThrough else TextDecoration.None,
-                        color = if (item.checked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onBackground,
-                    ),
-                    singleLine = true,
-                    modifier = Modifier.weight(1f).focusRequester(requester),
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.Sentences,
-                        imeAction = ImeAction.Next,
-                    ),
-                    keyboardActions = KeyboardActions(onNext = {
-                        // "Próximo" no teclado cria um novo item logo abaixo.
-                        val added = newItem()
-                        onChange("add", items.toMutableList().apply { add(index + 1, added) })
-                        onRequestFocus(added.id)
-                    }),
-                )
-                IconButton(onClick = { onChange("remove", items.filterNot { it.id == item.id }) }) {
-                    Icon(
-                        Icons.Outlined.Close,
-                        "Remover item",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-            if (focusItemId == item.id) {
-                LaunchedEffect(item.id) {
-                    runCatching { requester.requestFocus() }
-                    onFocusHandled()
-                }
-            }
-        }
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clickable {
-                    val added = newItem()
-                    onChange("add", items + added)
-                    onRequestFocus(added.id)
-                }
-                .padding(vertical = 12.dp, horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Outlined.Add, null, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(16.dp))
-            Text("Adicionar item", fontSize = 17.sp, color = MaterialTheme.colorScheme.primary)
-        }
-    }
-}
-
-@Composable
 private fun StatsBar(note: Note) {
-    val text = note.bodyText()
-    val words = countWords(note.title + " " + text)
-    val chars = (note.title + text).length
+    val text = note.title + "\n" + note.plainText()
+    val words = countWords(text)
+    val chars = (note.title + note.plainText()).length
     Surface(color = MaterialTheme.colorScheme.background) {
         Column {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -503,8 +373,9 @@ private fun StatsBar(note: Note) {
 
 @Composable
 private fun InfoDialog(note: Note, onDismiss: () -> Unit) {
-    val body = note.bodyText()
+    val body = note.plainText()
     val folder = Graph.repo.folder(note.folderId)
+    val todos = note.blocks.filter { it.type == BlockType.TODO }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Informações") },
@@ -512,11 +383,11 @@ private fun InfoDialog(note: Note, onDismiss: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 InfoLine("Criada em", formatDateTime(note.createdAt))
                 InfoLine("Última alteração", formatDateTime(note.updatedAt))
-                InfoLine("Tipo", if (note.isChecklist) "Lista (${note.items.size} itens)" else "Texto")
                 InfoLine("Pasta", folder?.name ?: "Sem pasta")
-                InfoLine("Palavras", countWords(note.title + " " + body).toString())
+                InfoLine("Palavras", countWords(note.title + "\n" + body).toString())
                 InfoLine("Caracteres", (note.title + body).length.toString())
-                InfoLine("Linhas", if (body.isEmpty()) "0" else body.lines().size.toString())
+                InfoLine("Blocos", note.blocks.size.toString())
+                if (todos.isNotEmpty()) InfoLine("Tarefas", "${todos.count { it.checked }} de ${todos.size} concluídas")
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
