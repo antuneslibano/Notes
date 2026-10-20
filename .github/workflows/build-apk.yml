@@ -24,7 +24,7 @@ jobs:
       - name: Compilar APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --stacktrace
+          ./gradlew assembleRelease
           cp app/build/outputs/apk/release/app-release.apk MinhasNotas.apk
 
       - name: Guardar APK nos artefatos
