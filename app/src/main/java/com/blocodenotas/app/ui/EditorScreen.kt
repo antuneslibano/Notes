@@ -134,8 +134,6 @@ private class EditHistory {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(noteId: Long, onBack: () -> Unit, onOpenNote: (Long) -> Unit) {
     val repo = Graph.repo
