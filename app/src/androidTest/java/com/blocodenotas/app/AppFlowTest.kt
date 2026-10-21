@@ -1,6 +1,7 @@
 package com.blocodenotas.app
 
 import android.view.KeyEvent
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
@@ -42,6 +43,7 @@ import org.junit.runner.RunWith
  * Percorre as funções do app na interface real, num emulador.
  * Cada teste cria notas com títulos únicos para não depender dos outros.
  */
+@OptIn(ExperimentalTestApi::class)
 @RunWith(AndroidJUnit4::class)
 class AppFlowTest {
 
