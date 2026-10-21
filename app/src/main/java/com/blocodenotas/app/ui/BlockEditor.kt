@@ -48,6 +48,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.AnnotatedString
@@ -65,7 +69,6 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.blocodenotas.app.Graph
 import com.blocodenotas.app.data.Block
 import com.blocodenotas.app.data.BlockType
 import com.blocodenotas.app.data.MarkKind
@@ -172,20 +175,36 @@ private val Shortcuts = listOf(
 
 data class SlashState(val blockId: Long, val start: Int, val query: String)
 
+private const val GUARD_MS = 300L
+
 // ---------------------------------------------------------------- Estado e regras de edição
 
 class BlockEditorState(
-    private val noteId: Long,
+    /** Blocos atuais da nota (sempre lidos na hora, nunca de uma cópia antiga). */
+    private val currentBlocks: () -> List<Block>?,
+    private val newId: () -> Long,
     /** Registra no histórico (desfazer) e grava a alteração. */
     val edit: (kind: String, transform: (Note) -> Note) -> Unit,
+    private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
-    private val repo = Graph.repo
     private val requesters = HashMap<Long, FocusRequester>()
+
+    /**
+     * Proteção contra eventos atrasados do teclado. Depois de uma mudança estrutural (Enter,
+     * comando, atalho, junção de blocos), alguns teclados ainda enviam chamadas baseadas no
+     * texto antigo do campo, como "/todo\n". Sem esta proteção cada uma delas virava um novo
+     * Enter e multiplicava os blocos.
+     */
+    private class Guard(val staleTexts: Set<String>, val until: Long)
+    private val guards = HashMap<Long, Guard>()
 
     val values = mutableStateMapOf<Long, TextFieldValue>()
     var focusedId by mutableStateOf<Long?>(null)
     var pendingFocus by mutableStateOf<Long?>(null)
     var slash by mutableStateOf<SlashState?>(null)
+
+    /** Último texto recebido do teclado que causou uma mudança estrutural. */
+    private var lastInput = ""
 
     fun requester(id: Long): FocusRequester = requesters.getOrPut(id) { FocusRequester() }
 
@@ -196,11 +215,33 @@ class BlockEditorState(
     }
 
     fun focus(id: Long, cursor: Int, text: String) {
-        values[id] = TextFieldValue(ZW + text, TextRange(cursor.coerceIn(0, text.length) + 1))
+        setProgrammatic(id, text, cursor)
         pendingFocus = id
     }
 
-    private fun blocks(): List<Block>? = repo.note(noteId)?.blocks
+    /** Troca o conteúdo de um campo por código, protegendo-o de eventos antigos do teclado. */
+    private fun setProgrammatic(id: Long, text: String, cursor: Int, vararg staleInputs: String) {
+        val stale = HashSet<String>()
+        values[id]?.text?.let { stale += it }
+        stale.addAll(staleInputs)
+        stale -= ZW + text
+        // Um campo novo não tem conexão antiga com o teclado: não precisa de proteção.
+        if (stale.isEmpty()) guards.remove(id) else guards[id] = Guard(stale, clock() + GUARD_MS)
+        values[id] = TextFieldValue(ZW + text, TextRange(cursor.coerceIn(0, text.length) + 1))
+    }
+
+    private fun blocks(): List<Block>? = currentBlocks()
+
+    private fun isStale(block: Block, input: TextFieldValue): Boolean {
+        val guard = guards[block.id] ?: return false
+        if (clock() > guard.until) {
+            guards.remove(block.id)
+            return false
+        }
+        if (input.text in guard.staleTexts) return true
+        // Logo após uma mudança estrutural, uma quebra de linha só pode ser repetição do Enter.
+        return block.type != BlockType.CODE && input.text.contains('\n')
+    }
 
     private fun commit(kind: String, blocks: List<Block>) = edit(kind) { it.copy(blocks = blocks) }
 
@@ -209,10 +250,12 @@ class BlockEditorState(
         val index = blocks.indexOfFirst { it.id == blockId }
         if (index < 0) return
         val block = blocks[index]
+        if (isStale(block, input)) return
 
         var nv = input
         if (!nv.text.startsWith(ZW)) {
             if (nv.text == block.text) {
+                lastInput = input.text
                 backspaceAtStart(blocks, index)
                 return
             }
@@ -233,6 +276,7 @@ class BlockEditorState(
         if (block.type != BlockType.CODE && newText.contains('\n')) {
             // Enter com o menu de comandos aberto escolhe o primeiro comando.
             val s = slash
+            lastInput = input.text
             if (s != null && s.blockId == blockId && newText.length == block.text.length + 1) {
                 val first = matchCommands(s.query).firstOrNull()
                 if (first != null) {
@@ -248,12 +292,15 @@ class BlockEditorState(
         if (block.type == BlockType.TEXT) {
             val shortcut = Shortcuts.firstOrNull { (prefix, _) -> newText.startsWith(prefix) && cursor == prefix.length }
             if (shortcut != null) {
+                lastInput = input.text
                 applyShortcut(blocks, index, newText, marks, shortcut.first.length, shortcut.second)
                 return
             }
         }
 
         values[blockId] = nv
+        // Uma tecla de verdade foi aceita: o teclado já está em dia com o campo.
+        guards.remove(blockId)
         edit("text$blockId") { n ->
             n.copy(blocks = n.blocks.map { if (it.id == blockId) it.copy(text = newText, marks = marks) else it })
         }
@@ -285,13 +332,13 @@ class BlockEditorState(
         val result = blocks.toMutableList()
         slash = null
         if (type == BlockType.DIVIDER) {
-            val next = Block(repo.newId(), BlockType.TEXT, rest, restMarks)
+            val next = Block(newId(), BlockType.TEXT, rest, restMarks)
             result[index] = Block(block.id, BlockType.DIVIDER)
             result.add(index + 1, next)
             focus(next.id, 0, rest)
         } else {
             result[index] = block.copy(type = type, text = rest, marks = restMarks)
-            values[block.id] = TextFieldValue(ZW + rest, TextRange(1))
+            setProgrammatic(block.id, rest, 0, lastInput)
         }
         commit("type", result)
     }
@@ -302,7 +349,7 @@ class BlockEditorState(
 
         // Enter em um item de lista vazio sai da lista.
         if (block.type.isList && block.text.isEmpty() && newText == "\n") {
-            values[block.id] = TextFieldValue(ZW, TextRange(1))
+            setProgrammatic(block.id, "", 0, lastInput)
             commit("type", blocks.map { if (it.id == block.id) it.copy(type = BlockType.TEXT, checked = false) else it })
             return
         }
@@ -310,8 +357,9 @@ class BlockEditorState(
         val lines = newText.split('\n')
         // Enter no começo de um bloco com texto abre uma linha vazia acima dele.
         if (lines.size == 2 && lines[0].isEmpty() && lines[1] == block.text) {
-            val above = Block(repo.newId(), BlockType.TEXT)
-            focus(block.id, 0, block.text)
+            val above = Block(newId(), BlockType.TEXT)
+            setProgrammatic(block.id, block.text, 0, lastInput)
+            pendingFocus = block.id
             commit("split", blocks.toMutableList().apply { add(index, above) })
             return
         }
@@ -321,9 +369,9 @@ class BlockEditorState(
         val created = lines.mapIndexed { i, line ->
             val m = Marks.slice(marks, offset, offset + line.length)
             offset += line.length + 1
-            if (i == 0) block.copy(text = line, marks = m) else Block(repo.newId(), block.type.continuation, line, m)
+            if (i == 0) block.copy(text = line, marks = m) else Block(newId(), block.type.continuation, line, m)
         }
-        values[block.id] = TextFieldValue(ZW + created.first().text, TextRange(created.first().text.length + 1))
+        setProgrammatic(block.id, created.first().text, created.first().text.length, lastInput)
         val last = created.last()
         focus(last.id, if (lines.size == 2) 0 else last.text.length, last.text)
         commit("split", blocks.take(index) + created + blocks.drop(index + 1))
@@ -332,7 +380,7 @@ class BlockEditorState(
     private fun backspaceAtStart(blocks: List<Block>, index: Int) {
         val block = blocks[index]
         slash = null
-        values[block.id] = TextFieldValue(ZW + block.text, TextRange(1))
+        setProgrammatic(block.id, block.text, 0, lastInput)
         when {
             // Primeiro o bloco volta a ser texto simples, como no Notion.
             block.type != BlockType.TEXT ->
@@ -381,19 +429,20 @@ class BlockEditorState(
     private fun changeType(blocks: List<Block>, index: Int, block: Block, type: BlockType, cursor: Int) {
         val result = blocks.toMutableList()
         if (type == BlockType.DIVIDER) {
-            val next = Block(repo.newId())
+            val next = Block(newId())
             if (block.text.isBlank()) {
                 result[index] = Block(block.id, BlockType.DIVIDER)
                 result.add(index + 1, next)
             } else {
                 result[index] = block
-                result.add(index + 1, Block(repo.newId(), BlockType.DIVIDER))
+                result.add(index + 1, Block(newId(), BlockType.DIVIDER))
                 result.add(index + 2, next)
             }
             focus(next.id, 0, "")
         } else {
             result[index] = block.copy(type = type, checked = if (type == BlockType.TODO) block.checked else false)
-            focus(block.id, cursor, block.text)
+            setProgrammatic(block.id, block.text, cursor, lastInput)
+            pendingFocus = block.id
         }
         commit("type", result)
     }
@@ -406,7 +455,7 @@ class BlockEditorState(
     fun removeBlock(blockId: Long) {
         val blocks = blocks() ?: return
         val result = blocks.filterNot { it.id == blockId }
-        commit("remove", result.ifEmpty { listOf(Block(repo.newId())) })
+        commit("remove", result.ifEmpty { listOf(Block(newId())) })
     }
 
     /** Toque na área vazia abaixo do texto: continua escrevendo no fim. */
@@ -416,7 +465,7 @@ class BlockEditorState(
         if (last != null && last.type == BlockType.TEXT && last.text.isEmpty()) {
             focus(last.id, 0, "")
         } else {
-            val next = Block(repo.newId())
+            val next = Block(newId())
             focus(next.id, 0, "")
             commit("add", blocks + next)
         }
@@ -570,6 +619,7 @@ private fun BlockField(block: Block, state: BlockEditorState, style: TextStyle, 
         visualTransformation = transformation,
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
         modifier = modifier
+            .testTag("block")
             .focusRequester(requester)
             .onFocusChanged {
                 if (it.isFocused) {
@@ -676,7 +726,12 @@ fun BlockToolbar(note: Note, state: BlockEditorState) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     SlashCommands.forEach { command ->
-                        Box(Modifier.clip(RoundedCornerShape(10.dp)).clickable { state.setType(command.type) }) {
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { state.setType(command.type) }
+                                .semantics(mergeDescendants = true) { contentDescription = command.label },
+                        ) {
                             Glyph(command.glyph, active = block.type == command.type)
                         }
                     }
@@ -691,10 +746,10 @@ fun BlockToolbar(note: Note, state: BlockEditorState) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    FormatKey("B", has(MarkKind.BOLD), SpanStyle(fontWeight = FontWeight.Bold)) { state.format(MarkKind.BOLD) }
-                    FormatKey("I", has(MarkKind.ITALIC), SpanStyle(fontStyle = FontStyle.Italic)) { state.format(MarkKind.ITALIC) }
-                    FormatKey("U", has(MarkKind.UNDERLINE), SpanStyle(textDecoration = TextDecoration.Underline)) { state.format(MarkKind.UNDERLINE) }
-                    FormatKey("S", has(MarkKind.STRIKE), SpanStyle(textDecoration = TextDecoration.LineThrough)) { state.format(MarkKind.STRIKE) }
+                    FormatKey("B", "Negrito", has(MarkKind.BOLD), SpanStyle(fontWeight = FontWeight.Bold)) { state.format(MarkKind.BOLD) }
+                    FormatKey("I", "Itálico", has(MarkKind.ITALIC), SpanStyle(fontStyle = FontStyle.Italic)) { state.format(MarkKind.ITALIC) }
+                    FormatKey("U", "Sublinhado", has(MarkKind.UNDERLINE), SpanStyle(textDecoration = TextDecoration.Underline)) { state.format(MarkKind.UNDERLINE) }
+                    FormatKey("S", "Tachado", has(MarkKind.STRIKE), SpanStyle(textDecoration = TextDecoration.LineThrough)) { state.format(MarkKind.STRIKE) }
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = { state.clearFormat() }) {
                         Icon(Icons.Outlined.FormatClear, "Limpar formatação", tint = colors.onSurface)
@@ -711,14 +766,18 @@ fun BlockToolbar(note: Note, state: BlockEditorState) {
 }
 
 @Composable
-private fun FormatKey(label: String, active: Boolean, span: SpanStyle, onClick: () -> Unit) {
+private fun FormatKey(label: String, description: String, active: Boolean, span: SpanStyle, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Box(
         Modifier
             .size(42.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(if (active) colors.primaryContainer else colors.surfaceVariant)
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = description
+                selected = active
+            },
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -753,7 +812,8 @@ private fun ColorRow(label: String, current: Int, background: Boolean, onPick: (
                             if (selected) colors.primary else colors.outlineVariant,
                             CircleShape,
                         )
-                        .clickable { onPick(i) },
+                        .clickable { onPick(i) }
+                        .semantics(mergeDescendants = true) { contentDescription = label + " " + PaletteNames[i] },
                     contentAlignment = Alignment.Center,
                 ) {
                     val textColor = if (!background && i != 0) paletteColor(i) else colors.onSurface

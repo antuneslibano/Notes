@@ -65,6 +65,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -147,7 +148,7 @@ fun EditorScreen(noteId: Long, onBack: () -> Unit, onOpenNote: (Long) -> Unit) {
 
     val history = remember(noteId) { EditHistory() }
     val state = remember(noteId) {
-        BlockEditorState(noteId) { kind, transform ->
+        BlockEditorState({ repo.note(noteId)?.blocks }, repo::newId) { kind, transform ->
             // Toda alteração vai direto para o repositório, que grava no aparelho em seguida.
             repo.note(noteId)?.let { history.record(it.editState(), kind) }
             repo.updateNote(noteId, transform = transform)
@@ -180,6 +181,8 @@ fun EditorScreen(noteId: Long, onBack: () -> Unit, onOpenNote: (Long) -> Unit) {
     }
 
     BackHandler { leave() }
+    // Com o menu de comandos aberto, "voltar" só fecha o menu.
+    BackHandler(enabled = state.slash != null) { state.slash = null }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -289,7 +292,7 @@ fun EditorScreen(noteId: Long, onBack: () -> Unit, onOpenNote: (Long) -> Unit) {
                     onValueChange = { value -> state.edit("title") { it.copy(title = value) } },
                     placeholder = "Título",
                     textStyle = TextStyle(fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold),
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp).focusRequester(titleRequester),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp).focusRequester(titleRequester).testTag("title"),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
                     keyboardActions = KeyboardActions(onNext = { state.focusFirst() }),
