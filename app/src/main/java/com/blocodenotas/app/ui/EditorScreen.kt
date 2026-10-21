@@ -148,11 +148,15 @@ fun EditorScreen(noteId: Long, onBack: () -> Unit, onOpenNote: (Long) -> Unit) {
 
     val history = remember(noteId) { EditHistory() }
     val state = remember(noteId) {
-        BlockEditorState({ repo.note(noteId)?.blocks }, repo::newId) { kind, transform ->
-            // Toda alteração vai direto para o repositório, que grava no aparelho em seguida.
-            repo.note(noteId)?.let { history.record(it.editState(), kind) }
-            repo.updateNote(noteId, transform = transform)
-        }
+        BlockEditorState(
+            currentBlocks = { repo.note(noteId)?.blocks },
+            newId = repo::newId,
+            edit = { kind, transform ->
+                // Toda alteração vai direto para o repositório, que grava no aparelho em seguida.
+                repo.note(noteId)?.let { history.record(it.editState(), kind) }
+                repo.updateNote(noteId, transform = transform)
+            },
+        )
     }
     val titleRequester = remember { FocusRequester() }
     var menu by remember { mutableStateOf(false) }
