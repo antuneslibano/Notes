@@ -155,7 +155,10 @@ val SlashCommands = listOf(
 fun matchCommands(query: String): List<SlashCommand> {
     val q = normalizeForSearch(query)
     if (q.isEmpty()) return SlashCommands
-    return SlashCommands.filter { c -> c.keys.any { it.startsWith(q) } || normalizeForSearch(c.label).contains(q) }
+    // Primeiro os comandos cujo nome começa com o que foi digitado ("/to" → tarefa, não "texto").
+    val byPrefix = SlashCommands.filter { c -> c.keys.any { it.startsWith(q) } }
+    val byLabel = SlashCommands.filter { c -> c !in byPrefix && normalizeForSearch(c.label).contains(q) }
+    return byPrefix + byLabel
 }
 
 /** Atalhos estilo Markdown digitados no começo de um bloco de texto. */
