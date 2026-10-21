@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.test.performTouchInput
@@ -179,8 +180,8 @@ class AppFlowTest {
         // O campo tem um caractere invisível na posição 0.
         block(0).performTextInputSelection(TextRange(1, 8))
         compose.onNodeWithContentDescription("Negrito").performClick()
-        compose.onNodeWithContentDescription("Cor Vermelho").performClick()
-        compose.onNodeWithContentDescription("Fundo Amarelo").performClick()
+        compose.onNodeWithContentDescription("Cor Vermelho").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Fundo Amarelo").performScrollTo().performClick()
         compose.waitForIdle()
         val block = noteTitled(title)!!.blocks[0]
         val marks = block.marks

@@ -795,19 +795,20 @@ private fun FormatKey(label: String, description: String, active: Boolean, span:
 private fun ColorRow(label: String, current: Int, background: Boolean, onPick: (Int) -> Unit) {
     val colors = MaterialTheme.colorScheme
     Row(
-        Modifier.fillMaxWidth().padding(start = 12.dp, top = 2.dp, bottom = 2.dp),
+        Modifier.fillMaxWidth().padding(start = 10.dp, top = 2.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, fontSize = 12.sp, color = colors.onSurfaceVariant, modifier = Modifier.width(44.dp))
+        Text(label, fontSize = 12.sp, color = colors.onSurfaceVariant, modifier = Modifier.width(40.dp))
+        // As 10 cores cabem numa tela de 360dp; em telas menores a linha rola.
         Row(
-            Modifier.horizontalScroll(rememberScrollState()).padding(end = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            Modifier.horizontalScroll(rememberScrollState()).padding(end = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             PaletteNames.indices.forEach { i ->
                 val selected = i == current
                 Box(
                     Modifier
-                        .size(34.dp)
+                        .size(27.dp)
                         .clip(CircleShape)
                         .background(if (background) (if (i == 0) colors.surfaceVariant else highlightColor(i)) else colors.surfaceVariant)
                         .border(
@@ -820,7 +821,7 @@ private fun ColorRow(label: String, current: Int, background: Boolean, onPick: (
                     contentAlignment = Alignment.Center,
                 ) {
                     val textColor = if (!background && i != 0) paletteColor(i) else colors.onSurface
-                    Text("A", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = textColor)
+                    Text("A", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = textColor)
                 }
             }
         }
