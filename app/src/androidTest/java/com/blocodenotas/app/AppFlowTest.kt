@@ -182,13 +182,16 @@ class AppFlowTest {
         compose.onNodeWithContentDescription("Cor Vermelho").performClick()
         compose.onNodeWithContentDescription("Fundo Amarelo").performClick()
         compose.waitForIdle()
-        val marks = noteTitled(title)!!.blocks[0].marks
-        assertTrue(marks.any { it.kind == MarkKind.BOLD && it.start == 0 && it.end == 7 })
-        assertTrue(marks.any { it.kind == MarkKind.COLOR && it.color == 9 })
-        assertTrue(marks.any { it.kind == MarkKind.HIGHLIGHT && it.color == 4 })
+        val block = noteTitled(title)!!.blocks[0]
+        val marks = block.marks
+        val info = "texto='${block.text}' marcas=$marks"
+        assertTrue("negrito: $info", marks.any { it.kind == MarkKind.BOLD && it.start == 0 && it.end == 7 })
+        assertTrue("cor: $info", marks.any { it.kind == MarkKind.COLOR && it.color == 9 })
+        assertTrue("fundo: $info", marks.any { it.kind == MarkKind.HIGHLIGHT && it.color == 4 })
         compose.onNodeWithContentDescription("Limpar formatação").performClick()
         compose.waitForIdle()
-        assertTrue(noteTitled(title)!!.blocks[0].marks.isEmpty())
+        val after = noteTitled(title)!!.blocks[0].marks
+        assertTrue("limpar: $after", after.isEmpty())
     }
 
     @Test
